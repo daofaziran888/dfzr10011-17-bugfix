@@ -55,6 +55,25 @@
       </tbody>
     </table>
 
+    <section class="checklist">
+      <h3>修复模板生命周期复核清单</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th v-for="column in checklistColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in checklist" :key="String(item.id)">
+            <td v-for="column in checklistColumns" :key="column">{{ formatChecklistCell(item[column]) }}</td>
+          </tr>
+          <tr v-if="!checklist.length">
+            <td :colspan="checklistColumns.length" class="empty-state">暂无模板引用复核数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条采集日志解析记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -68,18 +87,28 @@ import { onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+type ChecklistRow = Record<string, string | number | boolean | null>
 
 const ENDPOINT = '/api/logparse'
-const columns = ["模板编号", "日志类型", "解析规则", "字段提取", "格式化输出", "异常匹配", "应用范围", "模板状态"]
+const columns = ["模板编号", "日志类型", "解析规则", "字段提取", "格式化输出", "异常匹配", "应用范围", "模板状态", "引用模板编号", "引用模板版本", "解析批次"]
 const actions = ["启用模板", "暂停模板", "关闭模板"]
 const statuses = ["草稿", "已启用", "已暂停", "已关闭"]
 const stats = [{"label": "日志模板总数", "value": 0}, {"label": "已启用模板", "value": 0}, {"label": "已暂停模板", "value": 0}]
+const checklistColumns = ["模板编号", "解析状态", "解析批次", "引用模板编号", "引用模板版本", "模板当前版本", "模板当前状态", "版本一致"]
 
 const rows = ref<Row[]>([])
+const checklist = ref<ChecklistRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function formatChecklistCell(value: string | number | boolean | null | undefined) {
+  if (value === true) return '一致'
+  if (value === false) return '不一致'
+  if (value === null || value === undefined || value === '') return '—'
+  return value
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +128,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('采集日志解析动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || (payload && payload.ok === false)) {
+      throw new Error(payload?.message || payload?.detail || '采集日志解析动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
@@ -124,7 +154,28 @@ async function reload() {
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '采集日志解析列表读取失败'
   }
+  try {
+    const response = await request(`${ENDPOINT}/lifecycle`)
+    if (!response.ok) {
+      throw new Error('修复模板生命周期复核清单读取失败')
+    }
+    const payload = await response.json()
+    checklist.value = payload.items ?? []
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '修复模板生命周期复核清单读取失败'
+  }
 }
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.checklist {
+  margin-top: 16px;
+}
+
+.checklist h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+</style>

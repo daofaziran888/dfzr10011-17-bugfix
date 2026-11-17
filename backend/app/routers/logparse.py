@@ -30,9 +30,23 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出采集日志解析清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "logparse", "total": total, "items": items}
+
+
+@router.get("/lifecycle")
+def lifecycle_checklist() -> dict[str, Any]:
+    """修复模板生命周期复核清单：汇总每条日志模板的批次版本与模板引用结果数据。"""
+    items = service.lifecycle_checklist()
+    return {"module": "logparse", "total": len(items), "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
-    """读取单条日志模板明细；不存在时给出可读的错误说明。"""
+    """读取单条日志模板明细（含模板引用结果）；不存在时给出可读的错误说明。"""
     entry = service.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"日志模板 {entry_id} 不存在或已归档")
@@ -50,16 +64,9 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条日志模板执行启用模板、暂停模板、关闭模板；不允许的动作会被拦下并说明原因。"""
+    """对单条日志模板执行启用模板、暂停模板、关闭模板；越序或终态动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    entry, message = service.run_action(entry_id, action, values=payload.values, remark=payload.remark)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出采集日志解析清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "logparse", "total": total, "items": items}

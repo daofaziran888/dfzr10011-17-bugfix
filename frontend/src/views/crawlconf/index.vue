@@ -55,6 +55,25 @@
       </tbody>
     </table>
 
+    <section class="checklist">
+      <h3>模板引用结果复核（同步自采集日志解析）</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th v-for="column in checklistColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in checklist" :key="String(item.id)">
+            <td v-for="column in checklistColumns" :key="column">{{ formatChecklistCell(item[column]) }}</td>
+          </tr>
+          <tr v-if="!checklist.length">
+            <td :colspan="checklistColumns.length" class="empty-state">暂无模板引用复核数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条采集配置模板记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -68,18 +87,28 @@ import { onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+type ChecklistRow = Record<string, string | number | boolean | null>
 
 const ENDPOINT = '/api/crawlconf'
 const columns = ["模板编号", "模板名称", "目标类型", "配置参数", "版本号", "使用次数", "创建时间", "模板状态"]
 const actions = ["发布模板", "停用模板", "废弃模板"]
 const statuses = ["草稿", "已发布", "已停用", "已废弃"]
 const stats = [{"label": "配置模板总数", "value": 0}, {"label": "已发布模板", "value": 0}, {"label": "已停用模板", "value": 0}]
+const checklistColumns = ["模板编号", "解析状态", "解析批次", "引用模板编号", "引用模板版本", "模板当前版本", "模板当前状态", "版本一致"]
 
 const rows = ref<Row[]>([])
+const checklist = ref<ChecklistRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function formatChecklistCell(value: string | number | boolean | null | undefined) {
+  if (value === true) return '一致'
+  if (value === false) return '不一致'
+  if (value === null || value === undefined || value === '') return '—'
+  return value
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +128,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('采集配置模板动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || (payload && payload.ok === false)) {
+      throw new Error(payload?.message || payload?.detail || '采集配置模板动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
@@ -124,7 +154,28 @@ async function reload() {
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '采集配置模板列表读取失败'
   }
+  try {
+    const response = await request('/api/logparse/lifecycle')
+    if (!response.ok) {
+      throw new Error('模板引用结果复核清单读取失败')
+    }
+    const payload = await response.json()
+    checklist.value = payload.items ?? []
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '模板引用结果复核清单读取失败'
+  }
 }
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.checklist {
+  margin-top: 16px;
+}
+
+.checklist h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+</style>
